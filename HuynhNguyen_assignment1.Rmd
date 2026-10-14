@@ -1,0 +1,402 @@
+---
+title: "Assignment 1 - Linear Regression Model Fitting Using R"
+output: word_document
+author: "Huynh Nguyen"
+date: "2026-09-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Install Packages
+
+# install.packages("car")
+# install library 
+library(car)
+library(ggplot2)
+library(dplyr)
+#install.packages("corrplot")
+library(corrplot)
+library(readr)
+```
+# 1. Introduction
+
+The purpose of this analysis is to develop and evaluate a multiple linear regression model for predicting residential **SalePrice** in Ames, Iowa. The model uses housing characteristics that are expected to influence market value, including overall quality, above-ground living area, basement area, garage capacity, year built, number of full bathrooms, fireplaces, neighborhood, and kitchen quality. In addition to estimating the regression model, this report evaluates model fit, residual behavior, normality of residuals, potential outliers, and multicollinearity.
+
+# 2. Data Preparation
+```{r data-import}
+# Load housing data set
+AmesHousing <- read_csv("AmesHousing.csv")
+
+# Convert column names into valid R names (for example, 'Overall Qual' -> 'Overall.Qual').
+names(AmesHousing) <- make.names(names(AmesHousing))
+
+# Open spreadsheet view 
+  # View(AmesHousing) 
+  # data file has 83 columns and 2930 rows 
+
+# Basic dimensions of the original dataset
+dim(AmesHousing)
+
+# Check data type
+str(AmesHousing)
+```
+
+```{r variable-selection}
+# Choose variables 
+variables <- c(
+  "SalePrice",
+  "Overall.Qual",
+  "Gr.Liv.Area",
+  "Total.Bsmt.SF",
+  "Garage.Cars",
+  "Year.Built",
+  "Full.Bath",
+  "Fireplaces",
+  "Neighborhood",
+  "Kitchen.Qual"
+)
+# Create data frame and pick variables related
+data_model <- AmesHousing[,variables]
+
+# Check columns that missing values 
+missing_value <- colSums(is.na(data_model))
+missing_value
+
+n_before <- nrow(data_model)
+data_model <- na.omit(data_model)
+n_after <- nrow(data_model)
+
+# Encode qualitative variables as factors
+data_model$Neighborhood <- as.factor(data_model$Neighborhood)
+data_model$Kitchen.Qual <- as.factor(data_model$Kitchen.Qual)
+
+cat("Observations before removing incomplete cases:", n_before, "\n")
+cat("Observations used in the regression model:", n_after, "\n")
+cat("Observations removed due to missing values:", n_before - n_after, "\n")
+```
+The original Ames Housing dataset contains `r nrow(AmesHousing)` observations and `r ncol(AmesHousing)` variables. After selecting the variables needed for the analysis and removing observations with missing values, the final dataset contains **`r n_after` observations**.
+
+A total of **`r n_before - n_after` observations** were removed because they contained missing values in at least one of the selected variables. Neighborhood and Kitchen.Qual were converted to factors because they are categorical variables. Therefore represents their categories using indicator (dummy) variables in the regression model.
+
+# 3. Correlation Analysis
+```{r correlation-analysis, fig.cap="Correlation matrix for SalePrice and selected quantitative predictors"}
+# correlation analysis 
+numeric_vars <- data_model %>%
+  select(
+    SalePrice,
+    Overall.Qual,
+    Gr.Liv.Area,
+    Total.Bsmt.SF,
+    Garage.Cars,
+    Year.Built,
+    Full.Bath,
+    Fireplaces
+  )
+
+cor_matrix <- cor(numeric_vars)
+round(cor_matrix, 2)
+
+# correlation matrix 
+cor_plot <- corrplot(cor_matrix, method = "number", type = "upper") 
+
+sale_correlations <- cor_matrix[-1, "SalePrice"]
+strongest_cor_name <- names(which.max(abs(sale_correlations)))
+strongest_cor_value <- sale_correlations[strongest_cor_name]
+weakest_cor_name <- names(which.min(abs(sale_correlations)))
+weakest_cor_value <- sale_correlations[weakest_cor_name]
+
+cor_plot
+sale_correlations
+strongest_cor_name
+strongest_cor_value
+weakest_cor_name
+weakest_cor_value
+```
+Correlation measures the strength and direction of the linear relationship between two quantitative variables. Values range from -1 to +1.
+
+Among the selected quantitative predictors, **`r strongest_cor_name`** has the strongest relationship with SalePrice, with a correlation of **`r round(strongest_cor_value, 3)`**.
+
+The weakest relationship is between **`r weakest_cor_name`** and SalePrice, with a correlation of **`r round(weakest_cor_value, 3)`**.
+
+A positive correlation means that as the predictor increases, SalePrice tends to increase. A correlation closer to 1 represents a stronger positive linear relationship.
+
+# 4. Multiple Linear Regression 
+
+```{r regression-model}
+#regression 
+regression_model <- lm(
+  SalePrice ~
+    Overall.Qual +
+    Gr.Liv.Area +
+    Total.Bsmt.SF +
+    Garage.Cars +
+    Year.Built +
+    Full.Bath +
+    Fireplaces +
+    Neighborhood +
+    Kitchen.Qual,
+  data = data_model
+)
+
+model_summary <- summary(regression_model)
+model_summary
+
+r_squared <- model_summary$r.squared
+adj_r_squared <- model_summary$adj.r.squared
+
+f_stat <- model_summary$fstatistic
+
+f_value <- unname(f_stat[1])
+f_df1 <- unname(f_stat[2])
+f_df2 <- unname(f_stat[3])
+
+f_pvalue <- pf(
+  f_value,
+  f_df1,
+  f_df2,
+  lower.tail = FALSE
+)
+
+cat("R-squared:", round(r_squared, 4), "\n")
+cat("Adjusted R-squared:", round(adj_r_squared, 4), "\n")
+cat("F-statistic:", round(f_value, 3), "\n")
+cat("F-test p-value:", f_pvalue, "\n")
+
+```
+
+The model has an **R-squared of `r round(r_squared, 3)`**. Therefore, approximately **`r round(r_squared * 100, 1)`%** of the variation in SalePrice is explained by the predictors included in the regression model.
+
+The **Adjusted R-squared is `r round(adj_r_squared, 3)`**. Adjusted R-squared accounts for the number of predictors in the model. A value close to R-squared suggests that the model is not gaining much explanatory power simply by adding unnecessary predictors.
+
+The overall **F-statistic is `r round(f_value, 2)`**, with a p-value of **`r format.pval(f_pvalue, digits=3, eps=.001)`**.
+
+`r if(f_pvalue < .05)
+"The F-test is statistically significant, meaning that the predictors collectively explain a significant amount of variation in SalePrice." else "The F-test is not statistically significant, so the model as a whole does not provide sufficient evidence of explanatory value."`
+
+
+# 5. Residual Analysis 
+Residual plots are used to examine whether the regression errors appear randomly distributed around zero and whether there are signs of nonlinearity, unequal variance, or unusual observations. The assignment asks for residual plots based on coefficient magnitude and t-statistics. Because categorical predictors create multiple dummy coefficients that cannot be represented by one continuous x-axis, this comparison is performed among the selected quantitative predictors.
+
+```{r select-residual-predictors}
+
+# Save residuals
+model_residuals <- residuals(regression_model)
+
+# Quantitative predictors used in the regression
+numeric_predictors <- c(
+  "Overall.Qual",
+  "Gr.Liv.Area",
+  "Total.Bsmt.SF",
+  "Garage.Cars",
+  "Year.Built",
+  "Full.Bath",
+  "Fireplaces"
+)
+
+# Coefficient table without intercept
+coef_table <- summary(regression_model)$coefficients
+# Keep only quantitative predictors
+numeric_coef <- coef_table[
+  rownames(coef_table) %in% numeric_predictors,
+  ,
+  drop = FALSE
+]
+# Statistically significant coefficients
+significant_coef <- numeric_coef[
+  numeric_coef[, "Pr(>|t|)"] < 0.05,
+  ,
+  drop = FALSE
+]
+
+# Highest coefficient magnitude among significant predictors
+highest_coef_var <- rownames(significant_coef)[
+  which.max(abs(significant_coef[, "Estimate"]))
+]
+
+# Highest absolute t-statistic among significant predictors
+highest_t_var <- rownames(significant_coef)[
+  which.max(abs(significant_coef[, "t value"]))
+]
+
+# Lowest coefficient magnitude
+lowest_coef_var <- rownames(numeric_coef)[
+  which.min(abs(numeric_coef[, "Estimate"]))
+]
+
+# Lowest absolute t-statistic
+lowest_t_var <- rownames(numeric_coef)[
+  which.min(abs(numeric_coef[, "t value"]))
+]
+
+selection_table <- data.frame(
+  Criterion = c(
+    "Highest significant coefficient magnitude",
+    "Highest significant t-statistic",
+    "Lowest coefficient magnitude",
+    "Lowest t-statistic"
+  ),
+  Predictor = c(
+    highest_coef_var,
+    highest_t_var,
+    lowest_coef_var,
+    lowest_t_var
+  )
+)
+
+knitr::kable(
+   selection_table,
+   caption = "Predictors Selected for Residual Analysis")
+```
+```{r residual-plots, fig.width=7, fig.height=5}
+
+plot_residuals <- function(variable, title_text) {
+  plot(
+    data_model[[variable]],
+    model_residuals,
+    xlab = variable,
+    ylab = "Residuals",
+    main = title_text
+  )
+  abline(h = 0, lty = 2, lwd = 2)
+}
+
+a <- plot_residuals(
+  highest_coef_var,
+  paste("Residuals vs", highest_coef_var,
+        "- Highest Coefficient Magnitude")
+)
+
+b <- plot_residuals(
+  highest_t_var,
+  paste("Residuals vs", highest_t_var,
+        "- Highest t-statistic")
+)
+
+c <- plot_residuals(
+  lowest_coef_var,
+  paste("Residuals vs", lowest_coef_var,
+        "- Lowest Coefficient Magnitude")
+)
+
+d <- plot_residuals(
+  lowest_t_var,
+  paste("Residuals vs", lowest_t_var,
+        "- Lowest t-statistic")
+)
+a
+b
+c
+d
+
+```
+### Regression Coefficient Review
+
+A regression coefficient estimates how much SalePrice changes when one
+predictor increases by one unit while the other predictors are held constant.
+
+For example:
+
+- **Overall.Qual:** coefficient =
+  **`r round(coef_table["Overall.Qual","Estimate"], 2)`**.
+  A one-point increase in overall house quality is associated with an estimated
+  **$`r format(round(abs(coef_table["Overall.Qual","Estimate"]), 0), big.mark=",")`**
+  `r if(coef_table["Overall.Qual","Estimate"] > 0) "increase" else "decrease"`
+  in SalePrice, holding the other variables constant.
+
+- **Gr.Liv.Area:** coefficient =
+  **`r round(coef_table["Gr.Liv.Area","Estimate"], 2)`**.
+  One additional square foot of above-ground living space is associated with
+  approximately **$`r round(abs(coef_table["Gr.Liv.Area","Estimate"]), 2)`**
+  `r if(coef_table["Gr.Liv.Area","Estimate"] > 0) "higher" else "lower"`
+  SalePrice, holding other variables constant.
+
+- **Garage.Cars:** coefficient =
+  **`r round(coef_table["Garage.Cars","Estimate"], 2)`**.
+  Increasing garage capacity by one car is associated with approximately
+  **$`r format(round(abs(coef_table["Garage.Cars","Estimate"]),0), big.mark=",")`**
+  `r if(coef_table["Garage.Cars","Estimate"] > 0) "higher" else "lower"`
+  predicted SalePrice.
+  
+### Statistical Significance
+
+Statistical significance is evaluated using the p-value. At the 5% significance
+level, a predictor is considered statistically significant when **p < 0.05**.
+
+Overall.Qual has a p-value of
+**`r format.pval(coef_table["Overall.Qual","Pr(>|t|)"], digits=3, eps=.001)`**,
+so it is
+**`r if(coef_table["Overall.Qual","Pr(>|t|)"] < .05) "statistically significant" else "not statistically significant"`**.
+
+Gr.Liv.Area has a p-value of
+**`r format.pval(coef_table["Gr.Liv.Area","Pr(>|t|)"], digits=3, eps=.001)`**,
+so it is
+**`r if(coef_table["Gr.Liv.Area","Pr(>|t|)"] < .05) "statistically significant" else "not statistically significant"`**.
+
+A statistically significant predictor provides evidence of an association with
+SalePrice after controlling for the other predictors in the regression model. 
+  
+### Residual Analysis Review
+
+Residuals are the differences between the actual SalePrice and the SalePrice
+predicted by the regression model.
+
+The statistically significant quantitative predictor with the largest
+coefficient magnitude is **`r highest_coef_var`**.
+
+The statistically significant quantitative predictor with the largest absolute
+t-statistic is **`r highest_t_var`**.
+
+The predictor with the smallest coefficient magnitude is
+**`r lowest_coef_var`**, while the predictor with the smallest absolute
+t-statistic is **`r lowest_t_var`**.
+
+A satisfactory residual plot should show observations scattered randomly around
+zero with approximately constant spread. Curvature may indicate a nonlinear
+relationship, while a funnel-shaped pattern may indicate heteroscedasticity.
+  
+# 6. Q-Q Plot and Outlier Analysis 
+
+```{r qq-plot}
+# Calculate studentized residuals
+student_residual <- rstudent(regression_model)
+
+# Generate Q-Q plot and label top 5 unusual observations
+qq_outliers <- car::qqPlot(
+  student_residual,
+  id = list(n = 5),
+  main = "Q-Q Plot of Studentized Residuals"
+)
+qq_outliers
+
+```
+The Q-Q plot evaluates whether the regression residuals are approximately
+normally distributed.
+
+If most points follow the reference line, the normality assumption is reasonably
+satisfied. Points that move substantially away from the line, especially in the
+upper or lower tails, indicate possible departures from normality.
+
+The five observations labeled on the graph have the largest deviations and are
+treated as potential outliers. Their studentized residuals are reported in the
+table above.
+
+
+# 7. Multicollinearity 
+```{r Multicollinearity}
+# if VIF < 5 -> generally no multi-collinearity
+vif_result <- vif(regression_model)
+vif_result
+
+```
+Variance Inflation Factors (VIF) were used to evaluate multicollinearity among the explanatory variables. For predictors with one degree of freedom, VIF values below approximately 5 generally indicate that multicollinearity is not a serious concern. Higher values indicate stronger relationships among explanatory variables.
+Because Neighborhood and Kitchen.Qual contain multiple categories, the `car` package may report generalized variance inflation factors (GVIF). 
+
+# 8. Conclusion
+This analysis developed a multiple linear regression model to explain house SalePrice in Ames, Iowa using housing quality, living area, basement size, garage capacity, year built, bathrooms, fireplaces, neighborhood, and kitchen quality.
+
+The fitted model explains approximately `r round(r_squared * 100, 1)`% of the observed variation in SalePrice, with an adjusted R-squared of `r round(adj_r_squared, 3)`.
+
+The overall regression F-test is `r if (f_pvalue < 0.05) "statistically significant, indicating that the selected predictors jointly contribute to explaining SalePrice." else "not statistically significant at the 5% level."`
+
+Model adequacy was further evaluated using residual plots, the Q-Q plot, studentized residuals, and multicollinearity diagnostics. These results should be considered together when assessing the usefulness and limitations of the fitted regression model.
